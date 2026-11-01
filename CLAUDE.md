@@ -26,6 +26,7 @@ Python text-message agent that answers customers of Empório da Música, a ficti
 - Code, file names, README, docs and commit messages: English.
 - Everything the store's customer sees (agent replies, example conversations): Brazilian Portuguese.
 - "Empório da Música" is a proper noun and is never translated.
+- Use exact technical terms, consistently across code, README and explanations. No loose analogies: name what a thing is, and what it is not when confusion is likely.
 
 ## Commits and review
 
