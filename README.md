@@ -127,11 +127,29 @@ core, with no change to the agent.
 - It is the fastest loop for developing and testing the agent.
 
 **Not chosen: HTTP API.** It is what connects the agent to real channels, but exposing an
-endpoint safely takes more than an adapter (see [Known limitations](#known-limitations-and-what-i-would-do-with-more-time)).
+endpoint safely takes more than an adapter (see [What I would do with more time](#what-i-would-do-with-more-time)).
 
-## Known limitations and what I would do with more time
+### Conversation history: per session
 
-- **No HTTP API.** An API would let any channel use the same agent core: WhatsApp Business
+The agent remembers the current conversation, so follow-ups like "and does it come in
+blue?" work. History is kept in memory and capped: every turn resends the history to the
+model, so once a conversation passes a set size, the oldest messages are dropped to keep
+cost and latency in check. The cap is set by testing. In LangChain, conversation memory is
+a pluggable component, so moving it to a database (SQLite, Postgres) is a component swap,
+not a change to the agent.
+
+## Known limitations
+
+- **Terminal is the only adapter built.** The agent core does not depend on the channel,
+  but connecting WhatsApp, a website or other systems needs the HTTP API
+  ([next step](#what-i-would-do-with-more-time)).
+- **Memory lasts one session.** The agent forgets the conversation when the terminal
+  closes, and in long conversations the oldest messages are dropped by the history cap
+  ([why](#conversation-history-per-session), [next step](#what-i-would-do-with-more-time)).
+
+## What I would do with more time
+
+- **HTTP API.** An API would let any channel use the same agent core: WhatsApp Business
   webhooks, a chat widget on the store's website, a mobile app or internal tools. The core
   is already separated from the terminal, so the API itself is just a new adapter. What
   makes it a project of its own is exposing it safely: authentication, rate limiting, input
@@ -139,3 +157,11 @@ endpoint safely takes more than an adapter (see [Known limitations](#known-limit
   risk, not a feature. That work is outside this project's scope and timeline, so the time
   went into what decides the quality of every answer: data lookups, policy retrieval and
   the tests around them.
+- **Long-term memory per customer.** After each conversation, store a short summary of what
+  the store's data does not hold (products of interest, preferences, open issues) in a
+  vector store partitioned by customer, and retrieve it when that customer returns.
+  Isolation would be enforced in code, as a customer filter on every search, never left to
+  the model. It is out of this project's scope because it depends on the real channel to
+  identify customers reliably, needs extensive testing to prove no conversation reaches
+  another customer, and must comply with LGPD: store only what is needed (summaries, not
+  transcripts), with retention limits and deletion on request.
