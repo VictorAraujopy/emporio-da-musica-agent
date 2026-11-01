@@ -139,9 +139,10 @@ call.
 ### Interface: terminal chat
 
 The agent runs as a chat in the terminal. The agent core takes the conversation and the new
-message and returns the reply; it does not know where the message came from. The terminal is
-a thin adapter around that core, so any other channel is a new adapter calling the same
-core, with no change to the agent.
+message and returns the reply; it does not know where the message came from. The terminal
+adapter is `main.py`, at the repository root, a thin layer around that core. To serve
+another channel (an HTTP API, WhatsApp), write a new entry point next to it that calls the
+same core; nothing else in the agent changes.
 
 - One command to run: no server, no browser.
 - Customers reach the store by text message, and the terminal reproduces that exchange
@@ -175,6 +176,24 @@ an order takes the order number and the email on the customer's record, checked 
 The store dataset is fictional (the email domains are parodies such as `jmail.com`), so it
 is versioned with the code: it exposes no real person and keeps the project runnable with
 one command.
+
+## Assumptions
+
+The store's documents contradict themselves in a few places. These are the readings the
+agent follows.
+
+- **WhatsApp number.** The cover and the company table list (67) 3341-4444 as "Telefone /
+  WhatsApp"; section 7, which covers WhatsApp service specifically, gives (67) 3321-4500.
+  The agent gives (67) 3321-4500 for WhatsApp and (67) 3341-4444 for phone calls.
+- **Email.** Page 2 spells the domain with an accent (`empóriodamusica.com.br`); the cover
+  uses `emporiodamusica.com.br`. The accented form is treated as a typo.
+- **Catalog size.** The manual mentions more than 300 instruments; the database has 64
+  products. The agent confirms only products in the database; for anything else, it says it
+  did not find the product and points to WhatsApp.
+- **Dates.** The agent uses the current date. The orders run from October 2025 to March
+  2026, so open orders show as long past their estimated delivery: that is what this data
+  means today, and the agent reports it that way. Code that depends on the date receives it
+  as a parameter, so tests run on fixed dates.
 
 ## Known limitations
 
