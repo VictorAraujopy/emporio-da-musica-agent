@@ -3,6 +3,9 @@
 .venv/
 __pycache__/
 
+storage/
+decisions_details.md
+
 .idea/
 .claude/settings.local.json
 .DS_Store
