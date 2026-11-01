@@ -80,3 +80,36 @@ manual does not cover, and compared 14 embedding models available on OpenRouter.
 
 It runs through the API, so the project needs a single OpenRouter key: a local model would
 require whoever runs the project to download several GB of weights and install PyTorch.
+
+### Chat model: DeepSeek V4.1 Flash
+
+`deepseek/deepseek-v4.1-flash-1017`, chosen for cost-benefit: an open-weight model ranked
+11th overall on the Klu index (October 2026) at a fraction of the leaders' price: US$0.10
+input / US$0.29 output per million tokens on the chosen provider, against US$2–10 input for
+the top models. Its MIT license allows commercial use, and open weights mean a real store
+could run it on its own infrastructure, so customer data would never leave it.
+
+- **Pinned snapshot.** The dated `-1017` version does not change silently, so the model
+  keeps behaving as it did when tested.
+- **Validated, not compared.** Instead of a multi-model comparison, the agent must pass a
+  tool-calling test: right tool, right arguments, and no call when none is needed. The model
+  name is a setting in `.env`, so switching models is a configuration change, not a code
+  change.
+
+**Provider.** OpenRouter serves this model through about 40 providers, which differ in
+precision and in how they handle data. Requests are pinned to three, tried in order:
+DeepInfra, then Nebius, then Crusoe. Each one:
+
+- has a Zero Data Retention policy: prompts and replies are not stored;
+- serves the official FP8 weights (some providers serve compressed FP4 versions, which can
+  lose quality);
+- supports forcing a tool call, so the agent can require a data lookup before answering
+  about prices, stock or orders;
+- is a separate company with its own infrastructure, so one outage does not take the others
+  down.
+
+Fallback to providers outside this list is disabled, and the same requirements are also set
+as routing filters: if a provider later changes its policy, it is excluded automatically.
+A request may fail, but it is never served by a provider that stores data. DeepSeek's own
+API was ruled out: it has no Zero Data Retention policy and does not support forcing a tool
+call.
