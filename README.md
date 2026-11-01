@@ -81,6 +81,28 @@ manual does not cover, and compared 14 embedding models available on OpenRouter.
 It runs through the API, so the project needs a single OpenRouter key: a local model would
 require whoever runs the project to download several GB of weights and install PyTorch.
 
+### Policy index: own in-memory index, cached on disk
+
+There is no vector database. The manual's 25 chunks are embedded once through the API, and
+each question is compared with all of them by cosine similarity: an exact, brute-force
+search, instantaneous at this size and with no extra service to run. Vector databases use
+approximate indexes, built for millions of vectors.
+
+- **Own index instead of LangChain's `InMemoryVectorStore`.** LangChain's version rebuilds
+  its similarity matrix from the stored vectors on every search. Ours is a small NumPy
+  module that builds the normalized matrix once at startup, so each search is a single
+  matrix-vector product. Measured per query (Apple M4): 2.4 ms vs 0.005 ms with 25 chunks,
+  447 ms vs 3.4 ms with 10,000. LangChain is still used for the embedding calls.
+- **Cache with automatic rebuild.** The vectors are cached on disk (the matrix as a NumPy
+  file, the chunk texts and the PDF's hash as JSON), generated on each machine's first run
+  and not versioned. When the PDF's hash changes, the index is rebuilt at the next start;
+  if the rebuild fails, the agent stops with a clear error rather than answering from
+  outdated policies.
+- **When to change it.** At around 100,000 chunks the matrix needs over 1 GB of memory;
+  from there an approximate index such as FAISS fits better, and a knowledge base edited
+  often and read by several services belongs in pgvector. Search sits behind one function,
+  so either change stays in this module.
+
 ### Chat model: DeepSeek V4.1 Flash
 
 `deepseek/deepseek-v4.1-flash-1017`, chosen for cost-benefit: an open-weight model ranked
