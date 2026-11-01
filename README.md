@@ -113,3 +113,29 @@ as routing filters: if a provider later changes its policy, it is excluded autom
 A request may fail, but it is never served by a provider that stores data. DeepSeek's own
 API was ruled out: it has no Zero Data Retention policy and does not support forcing a tool
 call.
+
+### Interface: terminal chat
+
+The agent runs as a chat in the terminal. The agent core takes the conversation and the new
+message and returns the reply; it does not know where the message came from. The terminal is
+a thin adapter around that core, so any other channel is a new adapter calling the same
+core, with no change to the agent.
+
+- One command to run: no server, no browser.
+- Customers reach the store by text message, and the terminal reproduces that exchange
+  directly: one message in, one reply out.
+- It is the fastest loop for developing and testing the agent.
+
+**Not chosen: HTTP API.** It is what connects the agent to real channels, but exposing an
+endpoint safely takes more than an adapter (see [Known limitations](#known-limitations-and-what-i-would-do-with-more-time)).
+
+## Known limitations and what I would do with more time
+
+- **No HTTP API.** An API would let any channel use the same agent core: WhatsApp Business
+  webhooks, a chat widget on the store's website, a mobile app or internal tools. The core
+  is already separated from the terminal, so the API itself is just a new adapter. What
+  makes it a project of its own is exposing it safely: authentication, rate limiting, input
+  validation, and hosting with monitoring. An endpoint without these would be a security
+  risk, not a feature. That work is outside this project's scope and timeline, so the time
+  went into what decides the quality of every answer: data lookups, policy retrieval and
+  the tests around them.
