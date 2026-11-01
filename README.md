@@ -1,0 +1,82 @@
+# Empório da Música — Customer Service Agent
+
+A Python text-message agent that helps the team of Empório da Música, a fictional musical
+instrument store in Campo Grande/MS, answer recurring customer questions: opening hours,
+order status, product prices and availability.
+
+The agent:
+
+- speaks with a persona aligned with the store's identity and tone;
+- answers based on the store's operational data (products, orders, customers, promotions)
+  and its internal policy manual;
+- knows when to look up data (availability, prices, order status) and when to consult
+  policies (returns, opening hours, payment methods);
+- handles questions outside the store's scope.
+
+## How I used AI
+
+I built this project with **Claude Code** (Anthropic's CLI coding agent, Claude Opus 5.5).
+I drive the design and the rules; the assistant implements under them and is used to
+challenge my decisions, never to make them.
+
+1. **I define the architecture.** I propose the approach and stack, and use Claude to
+   stress-test them: trade-offs, risks, alternatives. Where I had no prior experience,
+   I asked for options with trade-offs and chose. Every decision and its reasoning is in
+   [Technical decisions](#technical-decisions).
+2. **I set the rules before any code.** Coding standards and writing rules live in
+   [`CLAUDE.md`](CLAUDE.md): single-responsibility functions of at most 40 lines, no side
+   effects at import time, type hints, one-line docstrings, language conventions. It is
+   versioned with the code, so the assistant's instructions are part of the repository.
+3. **Code comes in small blocks, gated by me.** Claude proposes one block at a time (one
+   file or less). I review it; only if I approve does it write it, and it asks for my
+   confirmation before moving on.
+4. **Independent review before each commit.** A separate review agent gets only the diff,
+   not the reasoning behind it, so it cannot simply agree with the author. I decide which
+   findings get fixed.
+5. **Security gate before each commit.** The diff is checked for secrets and personal data.
+
+## Technical decisions
+
+### Agent approach: tools for data, RAG for policies
+
+The agent answers two kinds of questions, and each one gets the mechanism that fits its data:
+
+- **Store data (prices, stock, orders, promotions) → tools (function calling).** This data
+  is volatile and must be exact: a price or a stock level has to come from the source at
+  the moment of the question, and a request like "acoustic guitars under R$1000" needs an
+  exact filter, not a similarity match. The model calls Python functions that read the data
+  and return exact results. This also follows the store's own manual: never give prices,
+  stock or delivery times without checking the system.
+- **Policies (returns, payment, shipping, opening hours) → RAG.** The manual is free text
+  that customers ask about in many different wordings, and it rarely changes, so it can be
+  indexed once and searched by meaning. At its current size (roughly 3k tokens) it would
+  fit in the prompt, but retrieval keeps the design viable as the manual grows and makes
+  retrieval quality measurable.
+
+**Not chosen: SQL agent.** Letting the model write its own queries is flexible but
+error-prone (a wrong or partial query gets answered with confidence), and it would give the
+model access to every table, including customers' personal data. With tools, the model can
+only reach what each function exposes.
+
+### Framework: LangChain
+
+LangChain is the industry standard for this kind of agent: tool calling, retrieval
+components and the agent loop come ready, so the code stays focused on the store's logic
+instead of plumbing. It reaches the model through the OpenAI-compatible API, which is how
+OpenRouter is accessed.
+
+### Embeddings: gemini-embedding-001
+
+Chosen by measurement on this manual, not by leaderboard alone. I built a test set of 42
+policy questions worded differently from the manual, 16 off-topic questions (half of them
+about music, the hardest to tell apart from store questions) and 4 store questions the
+manual does not cover, and compared 14 embedding models available on OpenRouter.
+
+- 11 of the 14 models placed the right section among the top 5 results for all 42 questions.
+- gemini-embedding-001 ranked it first in 38 of 42, among the best, and was one of only
+  four models for which a single similarity cutoff fully separated policy questions from
+  off-topic ones.
+- It is also first on MTEB-BR, a benchmark built natively in Brazilian Portuguese.
+
+It runs through the API, so the project needs a single OpenRouter key: a local model would
+require whoever runs the project to download several GB of weights and install PyTorch.
