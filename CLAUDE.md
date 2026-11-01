@@ -1,6 +1,6 @@
 # Empório da Música — customer service agent
 
-Python text-message agent that answers customers of Empório da Música, a fictional musical-instrument store in Campo Grande/MS, using the store's operational data (`data/*.csv`) and its policy manual (`data/políticas_da_loja.pdf`).
+Python text-message agent that answers customers of Empório da Música, a fictional musical-instrument store in Campo Grande/MS, using the store's operational data (`data/*.csv`) and its policy manual (`data/store_policies.pdf`).
 
 ## Workflow
 
@@ -9,6 +9,7 @@ Python text-message agent that answers customers of Empório da Música, a ficti
 - Before writing code, explain what will be done and why. After, summarize what was done.
 - Every technical decision needs a justification (why this value, this library, this approach).
 - Do not move to the next step until I say so.
+- Every agreed decision is recorded in full in `decisions_details.md` (local, not versioned) before moving on; the README keeps only the essentials.
 
 ## Code rules
 
