@@ -2,6 +2,8 @@
 
 > Conversa real com o agente (modelo `deepseek/deepseek-v4.1-flash-1017` via OpenRouter), gerada em 02/11/2026 enviando as mensagens do cliente ao core do agente. Abaixo de cada resposta, as ferramentas que o agente chamou naquele turno.
 
+> Nota: no 2º turno o agente diz que o C40 "dá em até 12x". Pelo manual (3.1), de 7x a 12x a parcela mínima é R$ 100,00, então para R$ 599,90 o máximo é 6x. O valor das parcelas é calculado em código, mas decidir qual faixa se aplica fica com o modelo: é uma limitação conhecida, descrita em Known limitations no README.
+
 **Cliente:** Oi! Quero um violão pra iniciante, até uns R$ 1000. O que vocês têm?
 
 **Empório da Música:** Oi! Tudo bem? Temos ótimas opções de violão até R$ 1000, todas em estoque. Separei as que mais saem pra iniciante:
