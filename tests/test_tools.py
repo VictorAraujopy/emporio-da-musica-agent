@@ -190,19 +190,27 @@ def test_the_first_installment_absorbs_the_leftover_cent() -> None:
     assert answer == "R$ 100,00 in 3x: 1x R$ 33,34 + 2x R$ 33,33"
 
 
-@pytest.mark.parametrize(("total", "installments"), [(100, 0), (100, 61), (-5, 2), (1e27, 2)])
+@pytest.mark.parametrize(
+    ("total", "installments"), [(100, 0), (100, 61), (-5, 2), (1e27, 2), (0.10, 12)]
+)
 def test_installments_refuse_a_total_or_count_out_of_range(
     total: float, installments: int
 ) -> None:
-    """Zero or too many installments, a negative or absurd total are not computed."""
+    """Zero or too many installments, a negative or absurd total, or under a cent each."""
     answer = split_into_installments.invoke({"total_brl": total, "installments": installments})
     assert answer == INVALID_INSTALLMENTS
 
 
-def test_installments_round_half_a_cent_up() -> None:
-    """R$ 0,05 in 2x is 0,025 each, which commercial rounding makes 0,03, so the first is 0,02."""
+def test_installments_round_down_and_the_first_takes_the_leftover_cents() -> None:
+    """R$ 0,05 in 2x: each rounds down to 0,02, and the first takes the cent left over."""
     answer = split_into_installments.invoke({"total_brl": 0.05, "installments": 2})
-    assert answer == "R$ 0,05 in 2x: 1x R$ 0,02 + 1x R$ 0,03"
+    assert answer == "R$ 0,05 in 2x: 1x R$ 0,03 + 1x R$ 0,02"
+
+
+def test_the_first_installment_is_never_negative() -> None:
+    """Many installments of a small total still add up, with no negative first installment."""
+    answer = split_into_installments.invoke({"total_brl": 10, "installments": 60})
+    assert answer == "R$ 10,00 in 60x: 1x R$ 0,56 + 59x R$ 0,16"
 
 
 def test_a_database_error_gives_a_text_instead_of_crashing(

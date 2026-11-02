@@ -3,7 +3,7 @@
 import math
 import sqlite3
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 from langchain.tools import tool
 
@@ -89,11 +89,13 @@ def apply_discount(price_brl: float, discount_percent: float) -> str:
 
 @tool
 def split_into_installments(total_brl: float, installments: int) -> str:
-    """Compute the installment values of a total; the first absorbs the rounding difference."""
+    """Compute the installments of a total, rounded down; the first takes the leftover cents."""
     if not is_valid_price(total_brl) or not 1 <= installments <= MAX_INSTALLMENTS:
         return INVALID_INSTALLMENTS
     total = Decimal(str(total_brl))
-    regular_value = (total / installments).quantize(ONE_CENT, rounding=ROUND_HALF_UP)
+    regular_value = (total / installments).quantize(ONE_CENT, rounding=ROUND_DOWN)
+    if regular_value < ONE_CENT:
+        return INVALID_INSTALLMENTS
     first_value = total - regular_value * (installments - 1)
     split_heading = f"{format_brl(total)} in {installments}x"
     if first_value == regular_value:
