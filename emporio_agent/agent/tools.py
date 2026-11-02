@@ -1,6 +1,7 @@
 """Tools the chat model calls: the store's data and price calculators, all returning text."""
 
 import math
+import sqlite3
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -9,9 +10,13 @@ from langchain.tools import tool
 from emporio_agent.store import queries
 from emporio_agent.store.models import ONE_CENT, Order, Product, ProductStatus
 
-NO_PRODUCT_FOUND = "No product in the catalog matches this search."
+NO_PRODUCT_FOUND = (
+    "No product matches this search. Product names rarely contain the instrument type, and"
+    " a category must be an exact name: check them with list_categories and search again."
+)
 NO_PROMOTION_ACTIVE = "No promotion is active right now."
 ORDER_NOT_FOUND = "No order matches this order number and email together."
+STORE_DATA_UNAVAILABLE = "The store's data is unavailable right now: say you could not check it."
 MAX_PRICE_BRL = 1_000_000_000
 MAX_INSTALLMENTS = 60
 INVALID_DISCOUNT = "Not computed: the price must be real and the percent between 0 and 100."
@@ -24,9 +29,12 @@ def search_catalog(
     category: str | None = None,
     max_price_brl: float | None = None,
 ) -> str:
-    """Search products by part of the name, category and/or the most the customer will pay."""
+    """Search products by part of the name, an exact category name and/or a price limit."""
     max_price = Decimal(str(max_price_brl)) if max_price_brl is not None else None
-    products = queries.search_products(name=name, category=category, max_price_brl=max_price)
+    try:
+        products = queries.search_products(name=name, category=category, max_price_brl=max_price)
+    except sqlite3.Error:
+        return STORE_DATA_UNAVAILABLE
     if not products:
         return NO_PRODUCT_FOUND
     return describe_products(products)
@@ -35,7 +43,10 @@ def search_catalog(
 @tool
 def list_promotions() -> str:
     """List the products on promotion right now, with their discounted prices."""
-    products = queries.find_products_on_promotion()
+    try:
+        products = queries.find_products_on_promotion()
+    except sqlite3.Error:
+        return STORE_DATA_UNAVAILABLE
     if not products:
         return NO_PROMOTION_ACTIVE
     return describe_products(products)
@@ -44,7 +55,11 @@ def list_promotions() -> str:
 @tool
 def list_categories() -> str:
     """List the names of the store's product categories."""
-    return ", ".join(queries.list_category_names())
+    try:
+        category_names = queries.list_category_names()
+    except sqlite3.Error:
+        return STORE_DATA_UNAVAILABLE
+    return ", ".join(category_names)
 
 
 @tool
@@ -54,6 +69,8 @@ def look_up_order(order_id: int, email: str) -> str:
         order = queries.find_order(order_id, email)
     except OverflowError:
         return ORDER_NOT_FOUND
+    except sqlite3.Error:
+        return STORE_DATA_UNAVAILABLE
     if order is None:
         return ORDER_NOT_FOUND
     return describe_order(order)
@@ -72,7 +89,7 @@ def apply_discount(price_brl: float, discount_percent: float) -> str:
 
 @tool
 def split_into_installments(total_brl: float, installments: int) -> str:
-    """Compute the installment values of a total; the first one absorbs any leftover cent."""
+    """Compute the installment values of a total; the first absorbs the rounding difference."""
     if not is_valid_price(total_brl) or not 1 <= installments <= MAX_INSTALLMENTS:
         return INVALID_INSTALLMENTS
     total = Decimal(str(total_brl))
@@ -155,7 +172,7 @@ def describe_order(order: Order) -> str:
     items = ", ".join(f"{item.quantity}x {item.product_name}" for item in order.items)
     fields = [
         f"order {order.order_id}",
-        f"date: {format_date(order.order_date)}",
+        f"ordered on: {format_date(order.order_date)}",
         f"status: {order.status}",
         f"total: {format_brl(order.total_brl)}",
         f"payment: {order.payment_method}",

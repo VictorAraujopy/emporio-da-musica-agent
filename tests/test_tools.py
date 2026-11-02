@@ -1,6 +1,7 @@
 """Tests for the agent's tools, with the store queries replaced by stubs: text, privacy, math."""
 
 import math
+import sqlite3
 from datetime import date
 from decimal import Decimal
 
@@ -12,6 +13,7 @@ from emporio_agent.agent.tools import (
     INVALID_INSTALLMENTS,
     NO_PRODUCT_FOUND,
     ORDER_NOT_FOUND,
+    STORE_DATA_UNAVAILABLE,
     apply_discount,
     format_brl,
     look_up_order,
@@ -125,6 +127,7 @@ def test_an_order_is_looked_up_with_its_number_and_email(monkeypatch: pytest.Mon
     monkeypatch.setattr(tools_module.queries, "find_order", record_lookup)
     text = look_up_order.invoke({"order_id": 8, "email": "cliente@jmail.com"})
     assert received_lookups == [(8, "cliente@jmail.com")]
+    assert "ordered on: 10/02/2026" in text
     assert "status: shipped" in text
     assert "tracking code: BRAB1234567BR" in text
     assert "estimated delivery: 28/02/2026" in text
@@ -194,3 +197,22 @@ def test_installments_refuse_a_total_or_count_out_of_range(
     """Zero or too many installments, a negative or absurd total are not computed."""
     answer = split_into_installments.invoke({"total_brl": total, "installments": installments})
     assert answer == INVALID_INSTALLMENTS
+
+
+def test_installments_round_half_a_cent_up() -> None:
+    """R$ 0,05 in 2x is 0,025 each, which commercial rounding makes 0,03, so the first is 0,02."""
+    answer = split_into_installments.invoke({"total_brl": 0.05, "installments": 2})
+    assert answer == "R$ 0,05 in 2x: 1x R$ 0,02 + 1x R$ 0,03"
+
+
+def test_a_database_error_gives_a_text_instead_of_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the store's database fails mid-session, the tool says so and the chat goes on."""
+
+    def broken_database(**filters: object) -> list[Product]:
+        """Fail like a database file that was removed."""
+        raise sqlite3.OperationalError("no such table: products")
+
+    monkeypatch.setattr(tools_module.queries, "search_products", broken_database)
+    assert search_catalog.invoke({"name": "violão"}) == STORE_DATA_UNAVAILABLE
