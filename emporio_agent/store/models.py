@@ -58,6 +58,21 @@ class Product:
         discounted_price = self.price_brl * fraction_to_pay
         return discounted_price.quantize(ONE_CENT, rounding=ROUND_HALF_UP)
 
+    @property
+    def current_price_brl(self) -> Decimal:
+        """Return the price the customer pays now: the promotional price, if there is one."""
+        promotional_price = self.promotional_price_brl
+        if promotional_price is None:
+            return self.price_brl
+        return promotional_price
+
+    @property
+    def is_available(self) -> bool:
+        """Return whether the product can be bought now: active and in stock."""
+        is_active = self.status == ProductStatus.ACTIVE
+        is_in_stock = self.stock_quantity > 0
+        return is_active and is_in_stock
+
 
 @dataclass(frozen=True)
 class OrderItem:
