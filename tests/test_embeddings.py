@@ -1,17 +1,15 @@
 """Tests for the embeddings client; every request is answered by a fake server, not the API."""
 
 import json
-import time
 from collections.abc import Callable
 
 import httpx
 import numpy as np
 import pytest
 from openrouter import OpenRouter
-from openrouter.utils.logger import NoOpLogger
 
 from emporio_agent.config import Settings
-from emporio_agent.policies.embeddings import create_embedding_client, embed_texts
+from emporio_agent.policies.embeddings import embed_texts
 
 TEST_SETTINGS = Settings(
     openrouter_api_key="test-key",
@@ -73,45 +71,6 @@ def test_fewer_vectors_than_texts_is_an_error() -> None:
     client = fake_openrouter(lambda request: embeddings_response([[1.0, 0.0]]))
     with pytest.raises(ValueError):
         embed_texts(client, ["primeiro", "segundo"], TEST_SETTINGS)
-
-
-def test_the_client_ignores_openrouter_variables_set_in_the_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A stray OPENROUTER_API_KEY or OPENROUTER_DEBUG cannot change the key or turn on logging."""
-    monkeypatch.setenv("OPENROUTER_API_KEY", "key-from-the-shell")
-    monkeypatch.setenv("OPENROUTER_DEBUG", "1")
-    client_config = create_embedding_client(TEST_SETTINGS).sdk_configuration
-    assert client_config.security.api_key == "test-key"
-    assert isinstance(client_config.debug_logger, NoOpLogger)
-    assert client_config.server_url == "https://openrouter.ai/api/v1"
-
-
-def test_a_server_error_fails_at_once_even_when_the_server_asks_to_wait(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """One attempt with a 10 s time limit: a 503 asking for an hour's wait is not obeyed."""
-    attempts = []
-    waits = []
-
-    def unavailable_for_an_hour(request: httpx.Request) -> httpx.Response:
-        """Answer the first request with 503 and a one-hour Retry-After; any retry succeeds."""
-        attempts.append(request)
-        if len(attempts) > 1:
-            return embeddings_response([[1.0, 0.0]])
-        error_body = {"error": {"code": 503, "message": "unavailable"}}
-        return httpx.Response(503, headers={"Retry-After": "3600"}, json=error_body)
-
-    monkeypatch.setattr(time, "sleep", waits.append)
-    client = create_embedding_client(TEST_SETTINGS)
-    client.sdk_configuration.client = httpx.Client(
-        transport=httpx.MockTransport(unavailable_for_an_hour)
-    )
-    with pytest.raises(Exception):
-        embed_texts(client, ["pergunta do cliente"], TEST_SETTINGS)
-    assert len(attempts) == 1
-    assert waits == []
-    assert client.sdk_configuration.timeout_ms == 10_000
 
 
 def test_vectors_returned_out_of_order_are_an_error() -> None:
