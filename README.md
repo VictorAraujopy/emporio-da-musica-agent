@@ -116,6 +116,46 @@ nearest-neighbor (ANN) indexing, pays off only for collections far larger than t
   edited often and read by several services belongs in pgvector. Search sits behind one
   function, so either change stays in this module.
 
+### Store data: SQLite, seeded from the CSV files
+
+The tools read the store's data from a SQLite database file (`storage/store.db`), the single
+source of truth for products, orders and promotions. The CSV files in `data/` are only its
+initial load (the seed): on the first run, when the file does not exist, the agent creates
+the tables and inserts the CSV rows. From then on the database is what the store updates,
+and the CSVs are not read again; deleting the file reloads it from them at the next start.
+Changes to the schema are not detected either: an existing database keeps the schema it was
+built with until its file is deleted.
+
+- **Read at the moment of the question.** Each tool call queries the database, as it would
+  the store's own system, so a new price or stock level shows up in the next reply with no
+  restart. SQLite needs no server: it is a single file, and Python's standard library
+  includes its driver. Its documentation places it at low-to-medium traffic, with any
+  number of readers but one writer at a time; many concurrent writers or several machines
+  call for a database server such as Postgres, to which the queries, plain SQL, carry over
+  with small changes.
+- **Fixed, parameterized queries.** The SQL is written in code. The model only supplies the
+  parameters (a product name, a price limit, an order number), and they reach SQLite as
+  values, never as SQL text.
+- **Money in whole cents.** Prices and totals are stored as integer cents and handled in
+  Python as `Decimal`. Binary floating point gets cents wrong (R$ 599.90 with 15% off comes
+  out as R$ 509.91 instead of R$ 509.92), and SQLite has no decimal type: stored as text,
+  prices would be compared character by character, so a filter like "até R$ 1.000" would
+  leave out R$ 599.90 ("5" sorts after "1"). Promotional prices are computed in code from
+  the price and the active discount, never by the model.
+- **Bad data stops the load.** The schema enforces each column's type (`STRICT` tables)
+  and the rules its values must follow: known status values, prices and stock that are not
+  negative, discounts between 1% and 99%, valid dates and JSON, at most one active
+  promotion per product. A malformed value in a CSV, or a row with more or fewer fields
+  than the header, stops the seed with an error instead of being stored, and the schema's
+  rules hold for any later write to the database. A failed seed deletes the partly built
+  file, so the next start loads it again instead of running on an incomplete database.
+- **Read-only connections.** The agent only reads, so it opens the database read-only,
+  which also means a query never creates the file: if the database is missing, the query
+  fails with an error instead of SQLite creating an empty one.
+- **Typed records.** Query results become typed records (frozen dataclasses, whose fields
+  cannot be reassigned) that carry only what the agent needs; an order record has no
+  customer fields (see [Privacy](#privacy-order-lookups-and-customer-data)).
+
 ### Chat model: DeepSeek V4.1 Flash
 
 `deepseek/deepseek-v4.1-flash-1017`, chosen for cost-benefit. It is an open-weight model
