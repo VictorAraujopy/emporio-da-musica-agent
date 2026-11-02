@@ -1,5 +1,8 @@
 """Tests for the agent core with a scripted chat model: guardrail retry, history and retrieval."""
 
+import dataclasses
+import json
+import time
 from types import SimpleNamespace
 
 import langsmith.utils
@@ -17,6 +20,7 @@ from emporio_agent.agent.core import (
     AgentCore,
     build_agent,
     build_retrieval_query,
+    create_chat_model,
     current_turn_messages,
     find_policy_excerpts,
     recent_history,
@@ -157,10 +161,10 @@ def test_the_history_cap_never_splits_a_tool_call_from_its_result() -> None:
     assert kept[-1].text == "resposta final"
 
 
-def test_a_discount_on_a_recalled_price_reruns_the_turn_with_a_forced_tool(
+def test_a_discount_on_a_price_never_looked_up_reruns_the_turn_with_a_forced_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A recalled price, only discounted, is unbacked: the turn is erased and redone."""
+    """A price no tool returned in the conversation, only discounted, is erased and redone."""
     monkeypatch.setattr(tools_module.queries, "search_products", lambda **filters: [])
     discount_call = {
         "name": "apply_discount",
@@ -226,3 +230,150 @@ def test_conversations_are_never_traced_to_langsmith(monkeypatch: pytest.MonkeyP
     reply(core, "test-conversation", "Oi")
     langsmith.utils.get_env_var.cache_clear()
     assert chat_model.tracing_states == [False]
+
+
+def test_a_price_looked_up_in_an_earlier_turn_can_be_reused_without_a_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Data a tool returned earlier in the conversation backs the reply: no forced retry."""
+    monkeypatch.setattr(tools_module.queries, "search_products", lambda **filters: [])
+    catalog_call = {"name": "search_catalog", "args": {"name": "C40"}, "id": "call-1"}
+    discount_call = {
+        "name": "apply_discount",
+        "args": {"price_brl": 599.9, "discount_percent": 5},
+        "id": "call-2",
+    }
+    chat_model = ScriptedChatModel(
+        responses=[
+            AIMessage("", tool_calls=[catalog_call]),
+            AIMessage("O C40 custa R$ 599,90."),
+            AIMessage("", tool_calls=[discount_call]),
+            AIMessage("No PIX fica R$ 569,91."),
+        ]
+    )
+    core = core_with(chat_model, StubEmbeddingsEndpoint())
+    reply(core, "test-conversation", "Quanto custa o C40?")
+    answer = reply(core, "test-conversation", "E no PIX?")
+    assert answer == "No PIX fica R$ 569,91."
+    assert "required" not in chat_model.tool_choices
+
+
+def test_the_guardrail_retry_is_not_traced_to_langsmith_either(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Erasing the unbacked turn happens with tracing off too, even with LANGSMITH_TRACING set."""
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "http://127.0.0.1:9")
+    langsmith.utils.get_env_var.cache_clear()
+    monkeypatch.setattr(tools_module.queries, "search_products", lambda **filters: [])
+    catalog_call = {"name": "search_catalog", "args": {"name": "violão"}, "id": "call-1"}
+    chat_model = ScriptedChatModel(
+        responses=[
+            AIMessage("O violão custa R$ 599,90."),
+            AIMessage("", tool_calls=[catalog_call]),
+            AIMessage("Consultei o catálogo."),
+        ]
+    )
+    core = core_with(chat_model, StubEmbeddingsEndpoint())
+    tracing_during_erase = []
+    original_update_state = core.agent.update_state
+
+    def record_tracing_then_update(*args: object, **kwargs: object) -> object:
+        """Note whether tracing is on while the turn is erased, then erase it."""
+        tracing_during_erase.append(langsmith.utils.tracing_is_enabled())
+        return original_update_state(*args, **kwargs)
+
+    monkeypatch.setattr(core.agent, "update_state", record_tracing_then_update)
+    reply(core, "test-conversation", "Quanto custa o violão?")
+    langsmith.utils.get_env_var.cache_clear()
+    assert tracing_during_erase == [False]
+    assert chat_model.tracing_states == [False, False, False]
+
+
+def test_an_order_status_after_only_a_catalog_search_is_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A product lookup earlier does not back an order status: the turn is redone."""
+    monkeypatch.setattr(tools_module.queries, "search_products", lambda **filters: [])
+    catalog_call = {"name": "search_catalog", "args": {"name": "C40"}, "id": "call-1"}
+    chat_model = ScriptedChatModel(
+        responses=[
+            AIMessage("", tool_calls=[catalog_call]),
+            AIMessage("O C40 custa R$ 599,90."),
+            AIMessage("Seu pedido 1234 foi enviado."),
+            AIMessage("Pra ver o pedido, preciso do e-mail cadastrado."),
+        ]
+    )
+    core = core_with(chat_model, StubEmbeddingsEndpoint())
+    reply(core, "test-conversation", "Quanto custa o C40?")
+    answer = reply(core, "test-conversation", "E o meu pedido 1234?")
+    assert answer == "Pra ver o pedido, preciso do e-mail cadastrado."
+    assert chat_model.tool_choices[-1] == "required"
+
+CHAT_SETTINGS = dataclasses.replace(TEST_SETTINGS, chat_quantizations=("fp8",))
+
+
+def chat_completion(text: str) -> httpx.Response:
+    """Build the answer the chat endpoint gives with this text."""
+    message = {"role": "assistant", "content": text}
+    choice = {"index": 0, "message": message, "finish_reason": "stop"}
+    usage = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    body = {"id": "test", "object": "chat.completion", "created": 0, "model": "test"}
+    body["system_fingerprint"] = "test"
+    return httpx.Response(200, json={**body, "choices": [choice], "usage": usage})
+
+
+def test_chat_requests_carry_the_privacy_rules_and_no_session_from_the_shell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The chat request pins providers with the fixed rules; the shell's session is ignored."""
+    monkeypatch.setenv("OPENROUTER_SESSION_ID", "shell-session")
+    sent_bodies = []
+
+    def record_and_answer(request: httpx.Request) -> httpx.Response:
+        """Keep the request body and answer with a short reply."""
+        sent_bodies.append(json.loads(request.content))
+        return chat_completion("Oi!")
+
+    chat_model = create_chat_model(CHAT_SETTINGS)
+    chat_model.client.sdk_configuration.client = httpx.Client(
+        transport=httpx.MockTransport(record_and_answer)
+    )
+    chat_model.invoke("Oi")
+    expected_provider_rules = {
+        "order": ["test-chat-provider"],
+        "allow_fallbacks": False,
+        "zdr": True,
+        "data_collection": "deny",
+        "require_parameters": True,
+        "quantizations": ["fp8"],
+    }
+    assert sent_bodies[0]["provider"] == expected_provider_rules
+    assert "session_id" not in sent_bodies[0]
+
+
+def test_a_chat_request_is_sent_once_with_a_30_second_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 503 asking for an hour's wait is not obeyed: one attempt, then the error."""
+    attempts = []
+    waits = []
+
+    def unavailable_for_an_hour(request: httpx.Request) -> httpx.Response:
+        """Answer the first request with 503 and a one-hour Retry-After; any retry succeeds."""
+        attempts.append(request)
+        if len(attempts) > 1:
+            return chat_completion("Oi!")
+        error_body = {"error": {"code": 503, "message": "unavailable"}}
+        return httpx.Response(503, headers={"Retry-After": "3600"}, json=error_body)
+
+    monkeypatch.setattr(time, "sleep", waits.append)
+    chat_model = create_chat_model(CHAT_SETTINGS)
+    chat_model.client.sdk_configuration.client = httpx.Client(
+        transport=httpx.MockTransport(unavailable_for_an_hour)
+    )
+    with pytest.raises(Exception):
+        chat_model.invoke("Oi")
+    assert len(attempts) == 1
+    assert waits == []
+    assert chat_model.client.sdk_configuration.timeout_ms == 30_000

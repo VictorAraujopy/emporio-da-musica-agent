@@ -95,6 +95,7 @@ def create_chat_model(settings: Settings) -> ChatOpenRouter:
         base_url=OPENROUTER_BASE_URL,
         client=create_openrouter_client(settings, CHAT_TIMEOUT_MS),
         openrouter_provider=chat_provider_rules(settings),
+        session_id=None,
     )
 
 
@@ -180,15 +181,22 @@ def current_turn_messages(
 
 
 def reply(core: AgentCore, conversation_id: str, customer_message: str) -> str:
-    """Answer one customer message within its conversation and return the reply's text."""
+    """Answer one customer message within its conversation, never traced to LangSmith."""
+    with tracing_context(enabled=False):
+        return answer_with_guardrail(core, conversation_id, customer_message)
+
+
+def answer_with_guardrail(core: AgentCore, conversation_id: str, customer_message: str) -> str:
+    """Run the turn; if it states store data no tool returned, rerun it with a tool forced."""
     conversation = {"configurable": {"thread_id": conversation_id}}
     retrieval_query = build_retrieval_query(core, conversation, customer_message)
     policy_excerpts = find_policy_excerpts(core, retrieval_query)
     system_prompt = build_system_prompt(date.today(), policy_excerpts)
     turn = TurnContext(system_prompt)
     answer = run_turn(core, conversation, [HumanMessage(customer_message)], turn)
-    turn_messages = current_turn_messages(saved_messages(core, conversation))
-    if needs_tool_call(answer.text, policy_excerpts, called_tool_names(turn_messages)):
+    conversation_messages = saved_messages(core, conversation)
+    if needs_tool_call(answer.text, policy_excerpts, called_tool_names(conversation_messages)):
+        turn_messages = current_turn_messages(conversation_messages)
         remove_turn = [RemoveMessage(id=message.id) for message in turn_messages]
         core.agent.update_state(conversation, {"messages": remove_turn})
         retry = TurnContext(system_prompt, force_tool_call=True)
@@ -199,9 +207,8 @@ def reply(core: AgentCore, conversation_id: str, customer_message: str) -> str:
 def run_turn(
     core: AgentCore, conversation: dict, new_messages: list[AnyMessage], turn: TurnContext
 ) -> AIMessage:
-    """Run the agent on the conversation plus any new messages, never traced to LangSmith."""
-    with tracing_context(enabled=False):
-        result = core.agent.invoke({"messages": new_messages}, config=conversation, context=turn)
+    """Run the agent on the conversation plus any new messages, and return its final reply."""
+    result = core.agent.invoke({"messages": new_messages}, config=conversation, context=turn)
     return result["messages"][-1]
 
 
@@ -210,11 +217,11 @@ def saved_messages(core: AgentCore, conversation: dict) -> list[AnyMessage]:
     return core.agent.get_state(conversation).values.get("messages", [])
 
 
-def called_tool_names(turn_messages: list[AnyMessage]) -> set[str]:
-    """Return the names of the tools the model called in a turn."""
+def called_tool_names(messages: list[AnyMessage]) -> set[str]:
+    """Return the names of the tools the model called in the given messages."""
     return {
         tool_call["name"]
-        for message in turn_messages
+        for message in messages
         if isinstance(message, AIMessage)
         for tool_call in message.tool_calls
     }

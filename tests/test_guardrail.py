@@ -56,3 +56,26 @@ def test_a_tracking_code_needs_a_tool_unless_it_is_the_policy_example() -> None:
 def test_a_reply_without_store_data_needs_no_tool() -> None:
     """Greetings and out-of-scope answers state nothing to check."""
     assert not needs_tool_call("Oi! Como posso te ajudar?", POLICY_EXCERPTS, NO_TOOLS)
+
+
+def test_a_catalog_search_does_not_back_an_order_status() -> None:
+    """Looking a product up says nothing about an order: the status still needs look_up_order."""
+    reply = "Seu pedido 1234 foi enviado, código BR123456789BR."
+    assert needs_tool_call(reply, POLICY_EXCERPTS, {"search_catalog"})
+    assert not needs_tool_call(reply, POLICY_EXCERPTS, {"look_up_order"})
+
+
+def test_an_order_lookup_does_not_back_a_stock_claim() -> None:
+    """Looking an order up says nothing about stock: it still needs a product tool."""
+    reply = "O violão tem 12 unidades em estoque."
+    assert needs_tool_call(reply, POLICY_EXCERPTS, {"look_up_order"})
+    assert not needs_tool_call(reply, POLICY_EXCERPTS, {"list_promotions"})
+
+
+def test_an_indirect_question_about_an_order_is_not_a_status_claim() -> None:
+    """'Ver se o pedido 8 foi enviado' asks for the email; it does not state the status."""
+    asking_for_email = "Pra eu ver se o pedido 8 já foi enviado, me passa o e-mail cadastrado?"
+    checking = "Consigo ver se o pedido 8 foi entregue, só preciso do e-mail."
+    assert not needs_tool_call(asking_for_email, POLICY_EXCERPTS, NO_TOOLS)
+    assert not needs_tool_call(checking, POLICY_EXCERPTS, NO_TOOLS)
+    assert needs_tool_call("O pedido 8 foi despachado.", POLICY_EXCERPTS, NO_TOOLS)

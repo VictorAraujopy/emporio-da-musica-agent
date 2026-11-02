@@ -5,12 +5,15 @@ from decimal import Decimal
 
 from emporio_agent.agent.tools import list_promotions, look_up_order, search_catalog
 
-DATA_TOOL_NAMES = {search_catalog.name, list_promotions.name, look_up_order.name}
+PRODUCT_TOOL_NAMES = {search_catalog.name, list_promotions.name}
+ORDER_TOOL_NAMES = {look_up_order.name}
+DATA_TOOL_NAMES = PRODUCT_TOOL_NAMES | ORDER_TOOL_NAMES
 MONEY_AMOUNT = re.compile(r"R\$\s*(\d[\d.]*(?:,\d{1,2})?)")
 STOCK_PHRASE = re.compile(
     r"em estoque|fora de estoque|sem estoque|esgotad[oa]s?|\d+\s+unidades?", re.IGNORECASE
 )
 ORDER_STATUS = re.compile(
+    r"(?<!\bse )(?<!\bse o )(?<!\bse seu )"
     r"pedido\s*(?:n[º°o]\.?\s*|#)?\d+[^.!?\n]{0,80}?"
     r"(?:enviad|entregue|confirmad|pendente|cancelad|despachad|a caminho|em trânsito)",
     re.IGNORECASE,
@@ -19,20 +22,23 @@ TRACKING_CODE = re.compile(r"\bBR[0-9A-Z]{9}BR\b")
 
 
 def needs_tool_call(reply_text: str, policy_excerpts: str, called_tool_names: set[str]) -> bool:
-    """Tell whether a reply states store data while no data tool was called in its turn."""
-    if called_tool_names & DATA_TOOL_NAMES:
-        return False
-    return bool(unsupported_claims(reply_text, policy_excerpts))
+    """Tell whether a reply states store data no matching tool returned in its conversation."""
+    return bool(unsupported_claims(reply_text, policy_excerpts, called_tool_names))
 
 
-def unsupported_claims(reply_text: str, policy_excerpts: str) -> list[str]:
-    """List the price, stock, order and tracking claims of a reply that no policy holds."""
-    return [
-        *money_claims_not_in_policies(reply_text, policy_excerpts),
-        *phrases_not_in_policies(STOCK_PHRASE, reply_text, policy_excerpts),
-        *phrases_not_in_policies(ORDER_STATUS, reply_text, policy_excerpts),
-        *phrases_not_in_policies(TRACKING_CODE, reply_text, policy_excerpts),
-    ]
+def unsupported_claims(
+    reply_text: str, policy_excerpts: str, called_tool_names: set[str]
+) -> list[str]:
+    """List the claims that neither the policies nor a tool of the matching kind back."""
+    claims = []
+    if not called_tool_names & DATA_TOOL_NAMES:
+        claims += money_claims_not_in_policies(reply_text, policy_excerpts)
+    if not called_tool_names & PRODUCT_TOOL_NAMES:
+        claims += phrases_not_in_policies(STOCK_PHRASE, reply_text, policy_excerpts)
+    if not called_tool_names & ORDER_TOOL_NAMES:
+        claims += phrases_not_in_policies(ORDER_STATUS, reply_text, policy_excerpts)
+        claims += phrases_not_in_policies(TRACKING_CODE, reply_text, policy_excerpts)
+    return claims
 
 
 def money_claims_not_in_policies(reply_text: str, policy_excerpts: str) -> list[str]:
