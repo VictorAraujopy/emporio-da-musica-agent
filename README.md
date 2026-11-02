@@ -40,8 +40,12 @@ only reach what each function exposes.
 
 LangChain is a widely used framework for this kind of agent: tool calling, embedding
 clients and the agent loop come ready, so the code stays focused on the store's logic
-instead of plumbing. OpenRouter exposes an OpenAI-compatible API, which LangChain supports
-directly.
+instead of plumbing. The chat model goes through LangChain's OpenRouter integration
+(`langchain-openrouter`), which keeps fields that only OpenRouter returns, such as the
+model's reasoning, and takes the provider routing as a setting of its own; LangChain's
+generic OpenAI client would drop those fields. `langchain-openrouter` has no embeddings
+class, so embeddings go through the generic client pointed at OpenRouter; it returns the
+vectors, which is all retrieval needs.
 
 ### Embeddings: gemini-embedding-001
 
@@ -103,9 +107,10 @@ self-host it.
   keeps behaving as it did when tested.
 - **Validated, not compared.** Public rankings already narrowed the choice, so instead of a
   multi-model comparison the agent must pass a tool-calling test: right tool, right
-  arguments, and no call when none is needed. The model
-  name is a setting in `.env`, so switching models is a configuration change, not a code
-  change.
+  arguments, and no call when none is needed. The model name, its providers and its
+  precision filter (FP8) are settings in `.env`, so switching models is a configuration
+  change, not a code change. The precision filter can be left empty for a model without
+  published weights, which offers no precision to choose.
 
 **Provider.** OpenRouter serves this model through 34 providers, which differ in
 precision and in how they handle data. Requests are pinned to three, tried in order:
@@ -121,9 +126,10 @@ DeepInfra, then Nebius, then Crusoe. Each one:
 
 Fallback to providers outside this list is disabled, and the same requirements are also set
 as routing filters: if a provider later changes its policy, it is excluded automatically.
-A request may fail, but it is never served by a provider that stores data. DeepSeek's own
-API was ruled out: it has no Zero Data Retention policy and does not support forcing a tool
-call.
+The Zero Data Retention, no-data-collection and no-fallback rules are fixed in code, not
+read from `.env`, so a wrong setting cannot switch them off. A request may fail, but it is
+never served by a provider that stores data. DeepSeek's own API was ruled out: it has no
+Zero Data Retention policy and does not support forcing a tool call.
 
 ### Interface: terminal chat
 
