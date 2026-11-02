@@ -1,4 +1,4 @@
-"""Settings read from the environment; locally, from the .env file at the project root."""
+"""Settings read from the environment (locally, from .env), and the rules fixed in code."""
 
 import os
 from collections.abc import Mapping
@@ -13,6 +13,12 @@ WHERE_TO_SET = (
     "Set it in .env (see .env.example); a variable set in the environment"
     " takes precedence over .env."
 )
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+ALLOW_PROVIDER_FALLBACKS = False
+REQUIRE_ZERO_DATA_RETENTION = True
+PROVIDER_DATA_COLLECTION = "deny"
+OPENROUTER_TIMEOUT_MS = 10_000
 
 
 class SettingsError(Exception):
